@@ -8,9 +8,12 @@ import ApiStatus from './components/ApiStatus'
 const API_BASE_URL = 'http://localhost:8000'
 
 function App() {
-  const [selectedExchange, setSelectedExchange] = useState('binance')
-  const [selectedSymbol, setSelectedSymbol] = useState('BTC/USDT')
-  const [selectedTimeframe, setSelectedTimeframe] = useState('1h')
+  // Kraken-only client
+  const [selectedExchange, setSelectedExchange] = useState('kraken')
+  // Default to ADA/USD per request
+ 
+  const [selectedSymbol, setSelectedSymbol] = useState('ADA/USD')
+  const [selectedTimeframe, setSelectedTimeframe] = useState('5m')
   const [apiStatus, setApiStatus] = useState('checking')
   const [availableMarkets, setAvailableMarkets] = useState([])
 
@@ -39,7 +42,27 @@ function App() {
       const response = await fetch(`${API_BASE_URL}/markets/${selectedExchange}`)
       if (response.ok) {
         const data = await response.json()
-        setAvailableMarkets(data.markets || [])
+        const markets = data.markets || []
+        // Sort markets: prefer USD quote pairs, then alphabetical
+        markets.sort((a, b) => {
+          const aIsUSD = (a.quote === 'USD') ? 0 : 1
+          const bIsUSD = (b.quote === 'USD') ? 0 : 1
+          if (aIsUSD !== bIsUSD) return aIsUSD - bIsUSD
+          return a.symbol.localeCompare(b.symbol)
+        })
+
+        setAvailableMarkets(markets)
+
+        // If current selectedSymbol isn't present in the fetched markets,
+        // pick a sensible default: prefer ADA/USD, otherwise first USD pair, otherwise first market
+        const symbols = markets.map(m => m.symbol)
+        const hasCurrent = symbols.includes(selectedSymbol)
+        if (!hasCurrent && symbols.length > 0) {
+          let candidate = markets.find(m => (m.base === 'ADA' || m.base === 'ADA') && m.quote === 'USD')
+          if (!candidate) candidate = markets.find(m => m.quote === 'USD')
+          if (!candidate) candidate = markets[0]
+          setSelectedSymbol(candidate.symbol)
+        }
       }
     } catch (error) {
       console.error('Error fetching markets:', error)

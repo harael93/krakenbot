@@ -139,6 +139,12 @@
   box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
 }
 
+/* Make large select lists scrollable and more usable */
+.selector[size] {
+  height: auto;
+  max-height: 360px;
+}
+
 .selection-summary {
   background: white;
   padding: 1rem;

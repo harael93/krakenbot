@@ -157,7 +157,7 @@
                 tickerSocket.close();
             }
             
-            const wsUrl = `ws://localhost:8000/ws/ticker/${exchange}/${symbol}`;
+            const wsUrl = `ws://localhost:8000/ws/ticker/${encodeURIComponent(exchange)}/${encodeURIComponent(symbol)}`;
             tickerSocket = new WebSocket(wsUrl);
             
             tickerSocket.onopen = () => {
@@ -234,7 +234,7 @@
                 ohlcvSocket.close();
             }
             
-            const wsUrl = `ws://localhost:8000/ws/ohlcv/${exchange}/${symbol}/${timeframe}`;
+            const wsUrl = `ws://localhost:8000/ws/ohlcv/${encodeURIComponent(exchange)}/${encodeURIComponent(symbol)}/${encodeURIComponent(timeframe)}`;
             ohlcvSocket = new WebSocket(wsUrl);
             
             ohlcvSocket.onopen = () => {

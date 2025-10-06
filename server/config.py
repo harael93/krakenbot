@@ -20,8 +20,8 @@ class Config:
     
     # Default exchange settings
     DEFAULT_EXCHANGE = "binance"
-    DEFAULT_SYMBOL = "BTC/USDT"
-    DEFAULT_TIMEFRAME = "1h"
+    DEFAULT_SYMBOL = "ADA/USD"
+    DEFAULT_TIMEFRAME = "5m"
     
     # Rate limiting
     ENABLE_RATE_LIMIT = True

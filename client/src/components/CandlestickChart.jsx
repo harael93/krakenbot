@@ -32,7 +32,7 @@ const CandlestickChart = ({ exchange, symbol, timeframe }) => {
   // Fetch initial historical data
   const fetchHistoricalData = useCallback(async () => {
     try {
-      const response = await fetch(`http://localhost:8000/ohlcv/${exchange}/${symbol}?timeframe=${timeframe}&limit=100`)
+      const response = await fetch(`http://localhost:8000/ohlcv/${encodeURIComponent(exchange)}/${encodeURIComponent(symbol)}?timeframe=${encodeURIComponent(timeframe)}&limit=100`)
       if (response.ok) {
         const data = await response.json()
         setHistoricalData(data.data || [])
@@ -51,7 +51,7 @@ const CandlestickChart = ({ exchange, symbol, timeframe }) => {
         wsRef.current.close()
       }
 
-      const wsUrl = `ws://localhost:8000/ws/ohlcv/${exchange}/${symbol}/${timeframe}`
+  const wsUrl = `ws://localhost:8000/ws/ohlcv/${encodeURIComponent(exchange)}/${encodeURIComponent(symbol)}/${encodeURIComponent(timeframe)}`
       wsRef.current = new WebSocket(wsUrl)
 
       wsRef.current.onopen = () => {

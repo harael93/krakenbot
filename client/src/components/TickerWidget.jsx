@@ -12,7 +12,7 @@ const TickerWidget = ({ exchange, symbol }) => {
         wsRef.current.close()
       }
 
-      const wsUrl = `ws://localhost:8000/ws/ticker/${exchange}/${symbol}`
+  const wsUrl = `ws://localhost:8000/ws/ticker/${encodeURIComponent(exchange)}/${encodeURIComponent(symbol)}`
       wsRef.current = new WebSocket(wsUrl)
 
       wsRef.current.onopen = () => {

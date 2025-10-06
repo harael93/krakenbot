@@ -1,3 +1,5 @@
+import React from 'react'
+
 const ExchangeSelector = ({
   selectedExchange,
   selectedSymbol,
@@ -7,10 +9,9 @@ const ExchangeSelector = ({
   onSymbolChange,
   onTimeframeChange
 }) => {
+  // Kraken-only UI
   const exchanges = [
-    { id: 'binance', name: 'Binance' },
-    { id: 'kraken', name: 'Kraken' },
-    { id: 'coinbase', name: 'Coinbase Pro' }
+    { id: 'kraken', name: 'Kraken' }
   ]
 
   const timeframes = [
@@ -31,22 +32,14 @@ const ExchangeSelector = ({
   ]
 
   // Popular trading pairs as fallback
-  const defaultSymbols = [
-    'BTC/USDT',
-    'ETH/USDT',
-    'BNB/USDT',
-    'ADA/USDT',
-    'SOL/USDT',
-    'DOT/USDT',
-    'LINK/USDT',
-    'MATIC/USDT',
-    'AVAX/USDT',
-    'UNI/USDT'
-  ]
+  // Show all fetched markets; render as a scrollable listbox if there are many
+  const symbolsToShow = availableMarkets.length > 0 ? availableMarkets : []
+  const [filter, setFilter] = React.useState('')
 
-  const symbolsToShow = availableMarkets.length > 0 
-    ? availableMarkets.slice(0, 20) // Show first 20 available markets
-    : defaultSymbols.map(symbol => ({ symbol }))
+  // Filter symbols by typed input (case-insensitive)
+  const filteredSymbols = filter.trim()
+    ? symbolsToShow.filter(m => m.symbol.toLowerCase().includes(filter.trim().toLowerCase()))
+    : symbolsToShow
 
   return (
     <div className="exchange-selector">
@@ -71,19 +64,40 @@ const ExchangeSelector = ({
 
         <div className="selector-group">
           <label htmlFor="symbol-select">Trading Pair:</label>
-          <select
-            id="symbol-select"
-            value={selectedSymbol}
-            onChange={(e) => onSymbolChange(e.target.value)}
-            className="selector"
-          >
-            {symbolsToShow.map(market => (
-              <option key={market.symbol} value={market.symbol}>
-                {market.symbol}
-                {market.base && market.quote && ` (${market.base}/${market.quote})`}
-              </option>
-            ))}
-          </select>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            <input
+              aria-label="Filter markets"
+              placeholder="Type to filter (e.g. XBT, BTC, USD)"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              className="selector"
+              style={{ padding: '0.5rem' }}
+            />
+
+            {filteredSymbols.length > 0 ? (
+            // Use a size attribute to show a scrollable listbox so the user can easily
+            // scroll through long lists of market pairs (use min to keep it compact)
+            <select
+              id="symbol-select"
+              value={selectedSymbol}
+              onChange={(e) => onSymbolChange(e.target.value)}
+              className="selector"
+              size={Math.min(15, filteredSymbols.length)}
+              style={{ overflowY: 'auto' }}
+            >
+              {filteredSymbols.map(market => (
+                <option key={market.symbol} value={market.symbol}>
+                  {market.symbol}
+                  {market.base && market.quote && ` (${market.base}/${market.quote})`}
+                </option>
+              ))}
+            </select>
+            ) : (
+              <select id="symbol-select" disabled className="selector">
+                <option>No markets match filter</option>
+              </select>
+            )}
+          </div>
         </div>
 
         <div className="selector-group">

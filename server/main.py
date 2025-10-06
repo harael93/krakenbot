@@ -68,36 +68,109 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 def get_exchange_instance(exchange_name: str):
-    """Get or create an exchange instance"""
-    if exchange_name not in exchange_instances:
+    """Get or create a Kraken exchange instance. This API supports Kraken only."""
+    if exchange_name.lower() != 'kraken':
+        raise HTTPException(status_code=400, detail="Only 'kraken' exchange is supported by this server")
+
+    key = 'kraken'
+    if key not in exchange_instances:
         try:
-            if exchange_name.lower() == 'binance':
-                exchange_instances[exchange_name] = ccxt.binance({
-                    'sandbox': False,
-                    'enableRateLimit': True,
-                })
-            elif exchange_name.lower() == 'kraken':
-                exchange_instances[exchange_name] = ccxt.kraken({
-                    'sandbox': False,
-                    'enableRateLimit': True,
-                })
-            elif exchange_name.lower() == 'coinbase':
-                exchange_instances[exchange_name] = ccxt.coinbasepro({
-                    'sandbox': False,
-                    'enableRateLimit': True,
-                })
-            else:
-                # Default to binance if unknown exchange
-                exchange_instances[exchange_name] = ccxt.binance({
-                    'sandbox': False,
-                    'enableRateLimit': True,
-                })
-            logger.info(f"Created new exchange instance: {exchange_name}")
+            exchange_instances[key] = ccxt.kraken({
+                'sandbox': False,
+                'enableRateLimit': True,
+            })
+            logger.info("Created Kraken exchange instance")
         except Exception as e:
-            logger.error(f"Error creating exchange instance {exchange_name}: {e}")
-            raise HTTPException(status_code=400, detail=f"Failed to create exchange instance: {e}")
-    
-    return exchange_instances[exchange_name]
+            logger.error(f"Error creating Kraken exchange instance: {e}")
+            raise HTTPException(status_code=400, detail=f"Failed to create Kraken exchange instance: {e}")
+
+    return exchange_instances[key]
+
+
+def resolve_symbol_for_exchange(exchange, symbol: str) -> str:
+    """Try to resolve a user-provided symbol into an exchange-supported symbol.
+
+    Tries exact match first, then common aliases (BTC<->XBT, USD<->USDT),
+    and finally searches markets by base/quote.
+    """
+    try:
+        # Ensure markets are loaded
+        if hasattr(exchange, 'load_markets'):
+            try:
+                exchange.load_markets()
+            except Exception:
+                # ignore load errors, we'll still try to resolve
+                pass
+
+        symbols = []
+        if hasattr(exchange, 'symbols') and exchange.symbols:
+            symbols = exchange.symbols
+        elif hasattr(exchange, 'markets') and exchange.markets:
+            symbols = list(exchange.markets.keys())
+
+        # Normalize
+        candidate = symbol.strip()
+        if candidate in symbols:
+            return candidate
+
+        # Basic variations
+        candidate_upper = candidate.upper()
+        if candidate_upper in symbols:
+            return candidate_upper
+
+        # If pair-like, try swaps
+        if '/' in candidate:
+            base, quote = candidate.split('/', 1)
+            base = base.strip()
+            quote = quote.strip()
+
+            # Base aliases - do not auto-convert BTC <-> XBT; only use the provided base
+            base_aliases = [base]
+            quote_aliases = [quote]
+            if quote.upper() in ('USD', 'USDT', 'USDC'):
+                quote_aliases = ['USD', 'USDT', 'USDC']
+
+            # Try combinations
+            for b in base_aliases:
+                for q in quote_aliases:
+                    cand = f"{b}/{q}"
+                    if cand in symbols:
+                        return cand
+                    if cand.upper() in symbols:
+                        return cand.upper()
+
+            # Some exchanges use alternate separators or IDs; search markets by base/quote fields
+            try:
+                for sym, m in (exchange.markets or {}).items():
+                    if not m:
+                        continue
+                    mb = (m.get('base') or '').upper()
+                    mq = (m.get('quote') or '').upper()
+                    if mb == base.upper() and mq == quote.upper():
+                        return sym
+                    # allow alias matches
+                    if mb in [b.upper() for b in base_aliases] and mq in [q.upper() for q in quote_aliases]:
+                        return sym
+            except Exception:
+                pass
+
+        # Last resort: try to find any market that contains the base or quote
+        try:
+            if '/' in candidate:
+                base, quote = candidate.split('/', 1)
+                for sym, m in (exchange.markets or {}).items():
+                    if not m:
+                        continue
+                    if base.upper() == (m.get('base') or '').upper() or base.upper() == (m.get('symbol') or '').upper():
+                        return sym
+        except Exception:
+            pass
+
+    except Exception:
+        pass
+
+    # If nothing found, return original symbol and let the caller handle the not-found error
+    return symbol
 
 @app.get("/")
 async def root():
@@ -106,10 +179,9 @@ async def root():
 @app.get("/exchanges")
 async def get_available_exchanges():
     """Get list of available exchanges"""
+    # Kraken-only for this server
     available_exchanges = [
-        {"id": "binance", "name": "Binance"},
         {"id": "kraken", "name": "Kraken"},
-        {"id": "coinbase", "name": "Coinbase Pro"},
     ]
     return {"exchanges": available_exchanges}
 
@@ -136,7 +208,7 @@ async def get_markets(exchange_name: str):
         logger.error(f"Error fetching markets for {exchange_name}: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
-@app.get("/ohlcv/{exchange_name}/{symbol}")
+@app.get("/ohlcv/{exchange_name}/{symbol:path}")
 async def get_ohlcv_data(
     exchange_name: str, 
     symbol: str, 
@@ -147,8 +219,13 @@ async def get_ohlcv_data(
     try:
         exchange = get_exchange_instance(exchange_name)
         
+        # Resolve symbol to an exchange-supported symbol
+        resolved = resolve_symbol_for_exchange(exchange, symbol)
+        if resolved != symbol:
+            logger.debug(f"Resolved symbol {symbol} -> {resolved}")
+
         # Fetch OHLCV data
-        ohlcv = exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
+        ohlcv = exchange.fetch_ohlcv(resolved, timeframe, limit=limit)
         
         # Format data
         formatted_data = []
@@ -173,7 +250,7 @@ async def get_ohlcv_data(
         logger.error(f"Error fetching OHLCV data: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
-@app.websocket("/ws/ticker/{exchange_name}/{symbol}")
+@app.websocket("/ws/ticker/{exchange_name}/{symbol:path}")
 async def websocket_ticker(websocket: WebSocket, exchange_name: str, symbol: str):
     """WebSocket endpoint for real-time ticker data"""
     room = f"ticker_{exchange_name}_{symbol}"
@@ -185,7 +262,10 @@ async def websocket_ticker(websocket: WebSocket, exchange_name: str, symbol: str
         # Start ticker polling (since we're using regular CCXT, not Pro)
         while True:
             try:
-                ticker = exchange.fetch_ticker(symbol)
+                resolved = resolve_symbol_for_exchange(exchange, symbol)
+                if resolved != symbol:
+                    logger.debug(f"Resolved symbol {symbol} -> {resolved}")
+                ticker = exchange.fetch_ticker(resolved)
                 
                 ticker_data = {
                     "type": "ticker",
@@ -202,7 +282,13 @@ async def websocket_ticker(websocket: WebSocket, exchange_name: str, symbol: str
                     "low": ticker.get('low'),
                     "volume": ticker.get('baseVolume')
                 }
-                
+
+                # Log the outgoing payload for debugging
+                try:
+                    logger.debug(f"Outgoing ticker_data: {json.dumps(ticker_data)}")
+                except Exception:
+                    logger.debug(f"Outgoing ticker_data (repr): {repr(ticker_data)}")
+
                 await manager.broadcast_to_room(json.dumps(ticker_data), room)
                 
                 # Poll every 2 seconds
@@ -219,7 +305,7 @@ async def websocket_ticker(websocket: WebSocket, exchange_name: str, symbol: str
         logger.error(f"WebSocket error: {e}")
         manager.disconnect(websocket, room)
 
-@app.websocket("/ws/ohlcv/{exchange_name}/{symbol}/{timeframe}")
+@app.websocket("/ws/ohlcv/{exchange_name}/{symbol:path}/{timeframe}")
 async def websocket_ohlcv(websocket: WebSocket, exchange_name: str, symbol: str, timeframe: str):
     """WebSocket endpoint for real-time OHLCV (candlestick) data"""
     room = f"ohlcv_{exchange_name}_{symbol}_{timeframe}"
@@ -230,7 +316,8 @@ async def websocket_ohlcv(websocket: WebSocket, exchange_name: str, symbol: str,
         
         # Send initial data
         try:
-            initial_ohlcv = exchange.fetch_ohlcv(symbol, timeframe, limit=100)
+            resolved_initial = resolve_symbol_for_exchange(exchange, symbol)
+            initial_ohlcv = exchange.fetch_ohlcv(resolved_initial, timeframe, limit=100)
             formatted_initial = []
             for candle in initial_ohlcv:
                 formatted_initial.append({
@@ -251,6 +338,12 @@ async def websocket_ohlcv(websocket: WebSocket, exchange_name: str, symbol: str,
                 "data": formatted_initial
             }
             
+            # Log and send initial OHLCV
+            try:
+                logger.debug(f"Sending initial OHLCV length={len(formatted_initial)} for {symbol}")
+            except Exception:
+                logger.debug("Sending initial OHLCV (could not stringify)")
+
             await manager.send_personal_message(json.dumps(initial_data), websocket)
         except Exception as e:
             logger.error(f"Error sending initial OHLCV data: {e}")
@@ -259,7 +352,10 @@ async def websocket_ohlcv(websocket: WebSocket, exchange_name: str, symbol: str,
         last_candle_timestamp = None
         while True:
             try:
-                ohlcv = exchange.fetch_ohlcv(symbol, timeframe, limit=2)
+                resolved = resolve_symbol_for_exchange(exchange, symbol)
+                if resolved != symbol:
+                    logger.debug(f"Resolved symbol {symbol} -> {resolved}")
+                ohlcv = exchange.fetch_ohlcv(resolved, timeframe, limit=2)
                 
                 if ohlcv and len(ohlcv) > 0:
                     latest_candle = ohlcv[-1]  # Get the most recent candle
@@ -279,7 +375,11 @@ async def websocket_ohlcv(websocket: WebSocket, exchange_name: str, symbol: str,
                             "close": latest_candle[4],
                             "volume": latest_candle[5]
                         }
-                        
+                        try:
+                            logger.debug(f"Broadcasting OHLCV update: {json.dumps(candle_data)}")
+                        except Exception:
+                            logger.debug(f"Broadcasting OHLCV update (repr): {repr(candle_data)}")
+
                         await manager.broadcast_to_room(json.dumps(candle_data), room)
                         last_candle_timestamp = latest_candle[0]
                 
