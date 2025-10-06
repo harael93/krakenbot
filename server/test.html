@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KrakenBot API Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        select, button {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        button:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 10px;
+        }
+        .status.connected {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status.disconnected {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .data-display {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
+            padding: 15px;
+            font-family: monospace;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .ticker-data {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        .ticker-item {
+            background: #e9ecef;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .ticker-label {
+            font-weight: bold;
+            color: #495057;
+        }
+        .ticker-value {
+            font-size: 1.1em;
+            color: #212529;
+        }
+        .price-change.positive {
+            color: #28a745;
+        }
+        .price-change.negative {
+            color: #dc3545;
+        }
+    </style>
+</head>
+<body>
+    <h1>KrakenBot API Test Interface</h1>
+    
+    <div class="container">
+        <h2>Ticker Data Stream</h2>
+        <div class="controls">
+            <select id="exchangeSelect">
+                <option value="binance">Binance</option>
+                <option value="kraken">Kraken</option>
+                <option value="coinbase">Coinbase</option>
+            </select>
+            <select id="symbolSelect">
+                <option value="BTC/USDT">BTC/USDT</option>
+                <option value="ETH/USDT">ETH/USDT</option>
+                <option value="ADA/USDT">ADA/USDT</option>
+                <option value="SOL/USDT">SOL/USDT</option>
+            </select>
+            <button id="connectTicker">Connect Ticker</button>
+            <button id="disconnectTicker" disabled>Disconnect</button>
+        </div>
+        <div id="tickerStatus" class="status disconnected">Disconnected</div>
+        <div id="tickerData" class="ticker-data"></div>
+    </div>
+
+    <div class="container">
+        <h2>OHLCV (Candlestick) Data Stream</h2>
+        <div class="controls">
+            <select id="ohlcvExchangeSelect">
+                <option value="binance">Binance</option>
+                <option value="kraken">Kraken</option>
+                <option value="coinbase">Coinbase</option>
+            </select>
+            <select id="ohlcvSymbolSelect">
+                <option value="BTC/USDT">BTC/USDT</option>
+                <option value="ETH/USDT">ETH/USDT</option>
+                <option value="ADA/USDT">ADA/USDT</option>
+                <option value="SOL/USDT">SOL/USDT</option>
+            </select>
+            <select id="timeframeSelect">
+                <option value="1m">1 Minute</option>
+                <option value="5m">5 Minutes</option>
+                <option value="1h" selected>1 Hour</option>
+                <option value="4h">4 Hours</option>
+                <option value="1d">1 Day</option>
+            </select>
+            <button id="connectOHLCV">Connect OHLCV</button>
+            <button id="disconnectOHLCV" disabled>Disconnect</button>
+        </div>
+        <div id="ohlcvStatus" class="status disconnected">Disconnected</div>
+        <div id="ohlcvData" class="data-display"></div>
+    </div>
+
+    <script>
+        let tickerSocket = null;
+        let ohlcvSocket = null;
+
+        // Ticker WebSocket functionality
+        document.getElementById('connectTicker').addEventListener('click', () => {
+            const exchange = document.getElementById('exchangeSelect').value;
+            const symbol = document.getElementById('symbolSelect').value;
+            
+            if (tickerSocket) {
+                tickerSocket.close();
+            }
+            
+            const wsUrl = `ws://localhost:8000/ws/ticker/${exchange}/${symbol}`;
+            tickerSocket = new WebSocket(wsUrl);
+            
+            tickerSocket.onopen = () => {
+                document.getElementById('tickerStatus').textContent = `Connected to ${exchange} ${symbol} ticker`;
+                document.getElementById('tickerStatus').className = 'status connected';
+                document.getElementById('connectTicker').disabled = true;
+                document.getElementById('disconnectTicker').disabled = false;
+            };
+            
+            tickerSocket.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                displayTickerData(data);
+            };
+            
+            tickerSocket.onclose = () => {
+                document.getElementById('tickerStatus').textContent = 'Disconnected';
+                document.getElementById('tickerStatus').className = 'status disconnected';
+                document.getElementById('connectTicker').disabled = false;
+                document.getElementById('disconnectTicker').disabled = true;
+            };
+            
+            tickerSocket.onerror = (error) => {
+                console.error('Ticker WebSocket error:', error);
+            };
+        });
+
+        document.getElementById('disconnectTicker').addEventListener('click', () => {
+            if (tickerSocket) {
+                tickerSocket.close();
+            }
+        });
+
+        function displayTickerData(data) {
+            const container = document.getElementById('tickerData');
+            const changeClass = data.change >= 0 ? 'positive' : 'negative';
+            
+            container.innerHTML = `
+                <div class="ticker-item">
+                    <div class="ticker-label">Last Price</div>
+                    <div class="ticker-value">$${data.last ? data.last.toFixed(2) : 'N/A'}</div>
+                </div>
+                <div class="ticker-item">
+                    <div class="ticker-label">24h Change</div>
+                    <div class="ticker-value price-change ${changeClass}">
+                        ${data.change ? data.change.toFixed(2) : 'N/A'} (${data.percentage ? data.percentage.toFixed(2) : 'N/A'}%)
+                    </div>
+                </div>
+                <div class="ticker-item">
+                    <div class="ticker-label">Bid/Ask</div>
+                    <div class="ticker-value">${data.bid ? data.bid.toFixed(2) : 'N/A'} / ${data.ask ? data.ask.toFixed(2) : 'N/A'}</div>
+                </div>
+                <div class="ticker-item">
+                    <div class="ticker-label">24h High/Low</div>
+                    <div class="ticker-value">${data.high ? data.high.toFixed(2) : 'N/A'} / ${data.low ? data.low.toFixed(2) : 'N/A'}</div>
+                </div>
+                <div class="ticker-item">
+                    <div class="ticker-label">Volume</div>
+                    <div class="ticker-value">${data.volume ? data.volume.toFixed(2) : 'N/A'}</div>
+                </div>
+                <div class="ticker-item">
+                    <div class="ticker-label">Last Update</div>
+                    <div class="ticker-value">${data.datetime ? new Date(data.datetime).toLocaleTimeString() : 'N/A'}</div>
+                </div>
+            `;
+        }
+
+        // OHLCV WebSocket functionality
+        document.getElementById('connectOHLCV').addEventListener('click', () => {
+            const exchange = document.getElementById('ohlcvExchangeSelect').value;
+            const symbol = document.getElementById('ohlcvSymbolSelect').value;
+            const timeframe = document.getElementById('timeframeSelect').value;
+            
+            if (ohlcvSocket) {
+                ohlcvSocket.close();
+            }
+            
+            const wsUrl = `ws://localhost:8000/ws/ohlcv/${exchange}/${symbol}/${timeframe}`;
+            ohlcvSocket = new WebSocket(wsUrl);
+            
+            ohlcvSocket.onopen = () => {
+                document.getElementById('ohlcvStatus').textContent = `Connected to ${exchange} ${symbol} ${timeframe} OHLCV`;
+                document.getElementById('ohlcvStatus').className = 'status connected';
+                document.getElementById('connectOHLCV').disabled = true;
+                document.getElementById('disconnectOHLCV').disabled = false;
+            };
+            
+            ohlcvSocket.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                displayOHLCVData(data);
+            };
+            
+            ohlcvSocket.onclose = () => {
+                document.getElementById('ohlcvStatus').textContent = 'Disconnected';
+                document.getElementById('ohlcvStatus').className = 'status disconnected';
+                document.getElementById('connectOHLCV').disabled = false;
+                document.getElementById('disconnectOHLCV').disabled = true;
+            };
+            
+            ohlcvSocket.onerror = (error) => {
+                console.error('OHLCV WebSocket error:', error);
+            };
+        });
+
+        document.getElementById('disconnectOHLCV').addEventListener('click', () => {
+            if (ohlcvSocket) {
+                ohlcvSocket.close();
+            }
+        });
+
+        function displayOHLCVData(data) {
+            const container = document.getElementById('ohlcvData');
+            
+            if (data.type === 'initial_ohlcv') {
+                container.innerHTML = '<h4>Initial OHLCV Data (Last 10 candles):</h4>';
+                const recent = data.data.slice(-10);
+                recent.forEach(candle => {
+                    container.innerHTML += formatCandle(candle);
+                });
+            } else if (data.type === 'ohlcv_update') {
+                const update = document.createElement('div');
+                update.innerHTML = '<h4>Latest Candle Update:</h4>' + formatCandle(data);
+                container.insertBefore(update, container.firstChild);
+            }
+        }
+
+        function formatCandle(candle) {
+            return `
+                <div style="margin-bottom: 10px; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+                    <strong>Time:</strong> ${new Date(candle.timestamp || candle.datetime).toLocaleString()}<br>
+                    <strong>OHLC:</strong> O: ${candle.open} | H: ${candle.high} | L: ${candle.low} | C: ${candle.close}<br>
+                    <strong>Volume:</strong> ${candle.volume}
+                </div>
+            `;
+        }
+    </script>
+</body>
+</html>

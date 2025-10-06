@@ -1,0 +1,55 @@
+"""
+Configuration settings for KrakenBot API
+"""
+
+import os
+from typing import Dict, Any
+
+class Config:
+    # Server settings
+    HOST = "0.0.0.0"
+    PORT = 8000
+    DEBUG = True
+    
+    # CORS settings
+    ALLOWED_ORIGINS = [
+        "http://localhost:5173",  # Vite dev server
+        "http://localhost:3000",  # Create React App dev server
+        "http://localhost:8080",  # Alternative dev server
+    ]
+    
+    # Default exchange settings
+    DEFAULT_EXCHANGE = "binance"
+    DEFAULT_SYMBOL = "BTC/USDT"
+    DEFAULT_TIMEFRAME = "1h"
+    
+    # Rate limiting
+    ENABLE_RATE_LIMIT = True
+    
+    # Supported exchanges
+    SUPPORTED_EXCHANGES = {
+        "binance": {
+            "name": "Binance",
+            "has_websockets": True,
+            "sandbox": False
+        },
+        "kraken": {
+            "name": "Kraken",
+            "has_websockets": True,
+            "sandbox": False
+        },
+        "coinbase": {
+            "name": "Coinbase Pro",
+            "has_websockets": True,
+            "sandbox": False
+        }
+    }
+    
+    # Supported timeframes
+    SUPPORTED_TIMEFRAMES = [
+        "1m", "3m", "5m", "15m", "30m",
+        "1h", "2h", "4h", "6h", "8h", "12h",
+        "1d", "3d", "1w", "1M"
+    ]
+
+config = Config()
