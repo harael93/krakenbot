@@ -6,7 +6,7 @@ Provides WebSocket endpoints for real-time market data and candlestick charts
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
-import ccxt.pro as ccxt
+import ccxt
 import asyncio
 import json
 import logging
@@ -27,7 +27,7 @@ app = FastAPI(
 # Enable CORS for the React client
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],  # React dev servers
+    allow_origins=["*"],  # Allow all origins for development
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -67,7 +67,7 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
-def get_exchange_instance(exchange_name: str) -> ccxt.Exchange:
+def get_exchange_instance(exchange_name: str):
     """Get or create an exchange instance"""
     if exchange_name not in exchange_instances:
         try:
@@ -118,17 +118,17 @@ async def get_markets(exchange_name: str):
     """Get available trading pairs for an exchange"""
     try:
         exchange = get_exchange_instance(exchange_name)
-        markets = await exchange.load_markets()
+        markets = exchange.load_markets()
         
         # Format markets for easier consumption
         formatted_markets = []
         for symbol, market in markets.items():
-            if market['active'] and market['spot']:  # Only active spot markets
+            if market.get('active', True) and market.get('spot', True):  # Only active spot markets
                 formatted_markets.append({
                     "symbol": symbol,
-                    "base": market['base'],
-                    "quote": market['quote'],
-                    "active": market['active']
+                    "base": market.get('base', ''),
+                    "quote": market.get('quote', ''),
+                    "active": market.get('active', True)
                 })
         
         return {"exchange": exchange_name, "markets": formatted_markets[:100]}  # Limit to first 100
@@ -148,7 +148,7 @@ async def get_ohlcv_data(
         exchange = get_exchange_instance(exchange_name)
         
         # Fetch OHLCV data
-        ohlcv = await exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
+        ohlcv = exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
         
         # Format data
         formatted_data = []
@@ -182,10 +182,10 @@ async def websocket_ticker(websocket: WebSocket, exchange_name: str, symbol: str
     try:
         exchange = get_exchange_instance(exchange_name)
         
-        # Start ticker stream
+        # Start ticker polling (since we're using regular CCXT, not Pro)
         while True:
             try:
-                ticker = await exchange.watch_ticker(symbol)
+                ticker = exchange.fetch_ticker(symbol)
                 
                 ticker_data = {
                     "type": "ticker",
@@ -205,9 +205,12 @@ async def websocket_ticker(websocket: WebSocket, exchange_name: str, symbol: str
                 
                 await manager.broadcast_to_room(json.dumps(ticker_data), room)
                 
+                # Poll every 2 seconds
+                await asyncio.sleep(2)
+                
             except Exception as e:
                 logger.error(f"Error in ticker stream: {e}")
-                await asyncio.sleep(1)
+                await asyncio.sleep(5)
                 
     except WebSocketDisconnect:
         manager.disconnect(websocket, room)
@@ -227,7 +230,7 @@ async def websocket_ohlcv(websocket: WebSocket, exchange_name: str, symbol: str,
         
         # Send initial data
         try:
-            initial_ohlcv = await exchange.fetch_ohlcv(symbol, timeframe, limit=100)
+            initial_ohlcv = exchange.fetch_ohlcv(symbol, timeframe, limit=100)
             formatted_initial = []
             for candle in initial_ohlcv:
                 formatted_initial.append({
@@ -252,33 +255,40 @@ async def websocket_ohlcv(websocket: WebSocket, exchange_name: str, symbol: str,
         except Exception as e:
             logger.error(f"Error sending initial OHLCV data: {e}")
         
-        # Start OHLCV stream
+        # Start OHLCV polling (since we're using regular CCXT, not Pro)
+        last_candle_timestamp = None
         while True:
             try:
-                ohlcv = await exchange.watch_ohlcv(symbol, timeframe)
+                ohlcv = exchange.fetch_ohlcv(symbol, timeframe, limit=2)
                 
                 if ohlcv and len(ohlcv) > 0:
                     latest_candle = ohlcv[-1]  # Get the most recent candle
                     
-                    candle_data = {
-                        "type": "ohlcv_update",
-                        "exchange": exchange_name,
-                        "symbol": symbol,
-                        "timeframe": timeframe,
-                        "timestamp": latest_candle[0],
-                        "datetime": datetime.fromtimestamp(latest_candle[0] / 1000).isoformat(),
-                        "open": latest_candle[1],
-                        "high": latest_candle[2],
-                        "low": latest_candle[3],
-                        "close": latest_candle[4],
-                        "volume": latest_candle[5]
-                    }
-                    
-                    await manager.broadcast_to_room(json.dumps(candle_data), room)
+                    # Only send update if this is a new or updated candle
+                    if last_candle_timestamp != latest_candle[0]:
+                        candle_data = {
+                            "type": "ohlcv_update",
+                            "exchange": exchange_name,
+                            "symbol": symbol,
+                            "timeframe": timeframe,
+                            "timestamp": latest_candle[0],
+                            "datetime": datetime.fromtimestamp(latest_candle[0] / 1000).isoformat(),
+                            "open": latest_candle[1],
+                            "high": latest_candle[2],
+                            "low": latest_candle[3],
+                            "close": latest_candle[4],
+                            "volume": latest_candle[5]
+                        }
+                        
+                        await manager.broadcast_to_room(json.dumps(candle_data), room)
+                        last_candle_timestamp = latest_candle[0]
+                
+                # Poll every 30 seconds for OHLCV updates
+                await asyncio.sleep(30)
                 
             except Exception as e:
                 logger.error(f"Error in OHLCV stream: {e}")
-                await asyncio.sleep(1)
+                await asyncio.sleep(10)
                 
     except WebSocketDisconnect:
         manager.disconnect(websocket, room)
@@ -293,7 +303,10 @@ async def shutdown_event():
     for exchange_name, exchange in exchange_instances.items():
         try:
             if hasattr(exchange, 'close'):
-                await exchange.close()
+                if asyncio.iscoroutinefunction(exchange.close):
+                    await exchange.close()
+                else:
+                    exchange.close()
             logger.info(f"Closed exchange connection: {exchange_name}")
         except Exception as e:
             logger.error(f"Error closing exchange {exchange_name}: {e}")
