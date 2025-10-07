@@ -33,6 +33,8 @@ const CandlestickChart = ({ exchange, symbol, timeframe }) => {
   const [error, setError] = useState(null)
   const [historicalData, setHistoricalData] = useState([])
   const [baseChartData, setBaseChartData] = useState(null)
+  const [botTrades, setBotTrades] = useState([])
+  const API_BASE = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_BASE) ? import.meta.env.VITE_API_BASE : 'http://localhost:8000'
 
   // Indicator toggles
   const [rsiEnabled, setRsiEnabled] = useState(false)
@@ -361,11 +363,39 @@ const CandlestickChart = ({ exchange, symbol, timeframe }) => {
     }
 
     // Merge base + indicators
-    setChartData({
-      labels: baseChartData.labels,
-      datasets: [...baseChartData.datasets, ...extraDatasets]
-    })
-  }, [baseChartData, historicalData, rsiEnabled, emaEnabled, bbEnabled])
+    let merged = { labels: baseChartData.labels, datasets: [...baseChartData.datasets, ...extraDatasets] }
+
+    // Add trade markers (entry / tp / sl) as scatter/point datasets
+    if (botTrades && botTrades.length > 0) {
+      const entries = botTrades.filter(t => t.symbol === symbol && t.entry_price).map(t => ({ x: new Date(t.open_time), y: Number(t.entry_price) }))
+      const tps = botTrades.filter(t => t.symbol === symbol && t.tp).map(t => ({ x: new Date(t.open_time), y: Number(t.tp) }))
+      const sls = botTrades.filter(t => t.symbol === symbol && t.sl).map(t => ({ x: new Date(t.open_time), y: Number(t.sl) }))
+
+      if (entries.length) merged.datasets.push({ label: 'Entries', type: 'scatter', data: entries, pointBackgroundColor: 'green', pointRadius: 6 })
+      if (tps.length) merged.datasets.push({ label: 'TakeProfits', type: 'scatter', data: tps, pointBackgroundColor: 'blue', pointRadius: 6 })
+      if (sls.length) merged.datasets.push({ label: 'StopLosses', type: 'scatter', data: sls, pointBackgroundColor: 'red', pointRadius: 6 })
+    }
+
+    setChartData(merged)
+  }, [baseChartData, historicalData, rsiEnabled, emaEnabled, bbEnabled, botTrades, symbol])
+
+  // Poll bot trades periodically
+  useEffect(() => {
+    let mounted = true
+    const loadTrades = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/bot/trades`)
+        if (!res.ok) return
+        const j = await res.json()
+        if (mounted) setBotTrades(j.trades || [])
+      } catch (err) {
+        console.error('Error loading bot trades', err)
+      }
+    }
+    loadTrades()
+    const id = setInterval(loadTrades, 15000)
+    return () => { mounted = false; clearInterval(id) }
+  }, [symbol])
 
   useEffect(() => {
     fetchHistoricalData()

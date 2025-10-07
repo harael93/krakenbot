@@ -9,10 +9,9 @@ const ExchangeSelector = ({
   onSymbolChange,
   onTimeframeChange
 }) => {
-  // Kraken-only UI
-  const exchanges = [
-    { id: 'kraken', name: 'Kraken' }
-  ]
+  // API base: allow override via Vite env VITE_API_BASE, fallback to localhost:8000
+  const API_BASE = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_BASE) ? import.meta.env.VITE_API_BASE : 'http://localhost:8000'
+  // Kraken-only UI (single exchange)
 
   const timeframes = [
     { id: '1m', name: '1 Minute' },
@@ -30,10 +29,6 @@ const ExchangeSelector = ({
     { id: '3d', name: '3 Days' },
     { id: '1w', name: '1 Week' }
   ]
-
-  // Popular trading pairs as fallback
-  // Show all fetched markets; render as a scrollable listbox if there are many
-  const symbolsToShow = availableMarkets.length > 0 ? availableMarkets : []
 
   // Enhanced selector state
   const [filter, setFilter] = React.useState('')
@@ -64,6 +59,7 @@ const ExchangeSelector = ({
   // Build filtered & sorted list
   const filteredSymbols = React.useMemo(() => {
     const q = filter.trim()
+    const symbolsToShow = availableMarkets.length > 0 ? availableMarkets : []
     let list = symbolsToShow.slice()
 
     if (showUSDOnly) {
@@ -88,12 +84,60 @@ const ExchangeSelector = ({
 
     // limit size to keep UI snappy
     return list.slice(0, 500)
-  }, [symbolsToShow, filter, showUSDOnly])
+  }, [availableMarkets, filter, showUSDOnly, scoreMarket])
 
   // Keep highlighted index in bounds and scroll into view
   React.useEffect(() => {
     setHighlightedIndex(i => Math.max(0, Math.min(i, Math.max(0, filteredSymbols.length - 1))))
   }, [filteredSymbols.length])
+
+  // Live dashboard state: when bot is started, poll /bot/trades and show live updates
+  const [dashboardActive, setDashboardActive] = React.useState(false)
+  const [dashboardTrades, setDashboardTrades] = React.useState([])
+  const dashboardPollRef = React.useRef(null)
+
+  const fetchDashboardTrades = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/bot/trades?limit=50`)
+      if (!res.ok) return
+      const j = await res.json()
+      setDashboardTrades(j.trades || [])
+    } catch (err) {
+      // ignore transient errors
+      // console.error('dashboard fetch', err)
+    }
+  }
+
+  const startDashboard = async () => {
+    // start server bot then activate dashboard only on success
+    try {
+      const res = await fetch(`${API_BASE}/bot/start?symbol=${encodeURIComponent(selectedSymbol)}&timeframe=${encodeURIComponent(selectedTimeframe)}`, { method: 'POST' })
+      if (!res.ok) { alert('Failed to start bot'); return }
+      setDashboardActive(true)
+      // initial fetch and start interval
+      fetchDashboardTrades()
+      dashboardPollRef.current = setInterval(fetchDashboardTrades, 3000)
+    } catch (err) {
+      alert('Failed to start bot: ' + err)
+    }
+  }
+
+  const stopDashboard = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/bot/stop`, { method: 'POST' })
+      if (!res.ok) { alert('Failed to stop bot'); return }
+      setDashboardActive(false)
+      if (dashboardPollRef.current) { clearInterval(dashboardPollRef.current); dashboardPollRef.current = null }
+      setDashboardTrades([])
+    } catch (err) {
+      alert('Failed to stop bot: ' + err)
+    }
+  }
+
+  // cleanup on unmount
+  React.useEffect(() => {
+    return () => { if (dashboardPollRef.current) clearInterval(dashboardPollRef.current) }
+  }, [])
 
   React.useEffect(() => {
     if (listRef.current) {
@@ -207,7 +251,28 @@ const ExchangeSelector = ({
             {availableMarkets.length} markets available from {selectedExchange}
           </p>
         )}
+          <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          <button type="button" className="selector" onClick={startDashboard}>Start Bot</button>
+          <button type="button" className="selector" onClick={stopDashboard}>Stop Bot</button>
+          <button type="button" className="selector" onClick={async () => {
+            try { const res = await fetch(`${API_BASE}/bot/status`); const j = await res.json(); alert(JSON.stringify(j)) } catch (err) { alert('Failed to query status: ' + err) }
+          }}>Bot Status</button>
+        </div>
       </div>
+      {dashboardActive && (
+        <div style={{ marginTop: '0.5rem', borderTop: '1px solid #ddd', paddingTop: '0.5rem' }}>
+          <h4>Live Bot Dashboard</h4>
+          {dashboardTrades.length === 0 ? (
+            <p>No trades yet</p>
+          ) : (
+            <ul style={{ maxHeight: '200px', overflowY: 'auto' }}>
+              {dashboardTrades.map(t => (
+                <li key={t.id}>{t.open_time}: {t.symbol} @ {t.entry_price} ({t.result})</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
     </div>
   )
 }

@@ -4,3 +4,5 @@ ccxt==4.1.26
 websockets==12.0
 python-multipart==0.0.6
 python-socketio==5.10.0
+numpy==2.3.3
+pandas==2.3.3

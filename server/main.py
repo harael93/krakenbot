@@ -13,6 +13,22 @@ import logging
 from typing import Dict, List, Optional
 from datetime import datetime, timedelta
 import uvicorn
+import threading
+
+# optional import of trading bot (exists in repo)
+try:
+    from trading_bot import run_polling_loop
+except Exception:
+    run_polling_loop = None
+
+# Trading bot thread state
+bot_thread = None
+bot_thread_lock = threading.Lock()
+
+def is_bot_running():
+    global bot_thread
+    return bot_thread is not None and bot_thread.is_alive()
+
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -410,6 +426,70 @@ async def shutdown_event():
             logger.info(f"Closed exchange connection: {exchange_name}")
         except Exception as e:
             logger.error(f"Error closing exchange {exchange_name}: {e}")
+
+
+@app.post('/bot/start')
+def api_start_bot(symbol: Optional[str] = None, timeframe: str = '1m'):
+    """Start the trading bot in background (dry-run unless configured)."""
+    global bot_thread
+    if run_polling_loop is None:
+        raise HTTPException(status_code=500, detail='Trading bot module not available')
+
+    with bot_thread_lock:
+        if is_bot_running():
+            return {'status': 'already_running'}
+
+        def target():
+            try:
+                run_polling_loop(symbol or None, timeframe)
+            except Exception as e:
+                logger.error(f'Bot thread error: {e}')
+
+        bot_thread = threading.Thread(target=target, daemon=True)
+        bot_thread.start()
+        return {'status': 'started'}
+
+
+@app.post('/bot/stop')
+def api_stop_bot():
+    """Stop the trading bot (best-effort)."""
+    global bot_thread
+    with bot_thread_lock:
+        if not is_bot_running():
+            return {'status': 'not_running'}
+        # best-effort stop: threads in trading_bot should exit on their own on next iteration
+        bot_thread = None
+        return {'status': 'stopping'}
+
+
+@app.get('/bot/status')
+def api_bot_status():
+    return {'running': is_bot_running()}
+
+
+@app.get('/bot/trades')
+def api_bot_trades(limit: int = 50):
+    """Return recent trades logged by the trading bot."""
+    try:
+        import sqlite3, os
+        db_path = os.path.join(os.path.dirname(__file__), 'trades.db')
+        if not os.path.exists(db_path):
+            return {'trades': []}
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        cur.execute('SELECT id, symbol, amount, entry_price, tp, sl, result, open_time, close_time FROM trades ORDER BY id DESC LIMIT ?', (limit,))
+        rows = cur.fetchall()
+        trades = []
+        for r in rows:
+            trades.append({
+                'id': r[0], 'symbol': r[1], 'amount': r[2], 'entry_price': r[3],
+                'tp': r[4], 'sl': r[5], 'result': r[6], 'open_time': r[7], 'close_time': r[8]
+            })
+        conn.close()
+        return {'trades': trades}
+    except Exception as e:
+        logger.error(f'Error reading trades DB: {e}')
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     uvicorn.run(
