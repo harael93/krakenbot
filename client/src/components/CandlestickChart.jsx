@@ -4,6 +4,9 @@ import {
   CategoryScale,
   LinearScale,
   TimeScale,
+  PointElement,
+  LineElement,
+  LineController,
   BarElement,
   Title,
   Tooltip,
@@ -11,11 +14,13 @@ import {
 } from 'chart.js'
 import { Bar } from 'react-chartjs-2'
 import 'chartjs-adapter-date-fns'
-
 ChartJS.register(
   CategoryScale,
   LinearScale,
   TimeScale,
+  PointElement,
+  LineElement,
+  LineController,
   BarElement,
   Title,
   Tooltip,
@@ -27,6 +32,12 @@ const CandlestickChart = ({ exchange, symbol, timeframe }) => {
   const [isConnected, setIsConnected] = useState(false)
   const [error, setError] = useState(null)
   const [historicalData, setHistoricalData] = useState([])
+  const [baseChartData, setBaseChartData] = useState(null)
+
+  // Indicator toggles
+  const [rsiEnabled, setRsiEnabled] = useState(false)
+  const [emaEnabled, setEmaEnabled] = useState(false)
+  const [bbEnabled, setBbEnabled] = useState(false)
   const wsRef = useRef(null)
 
   // Fetch initial historical data
@@ -172,11 +183,189 @@ const CandlestickChart = ({ exchange, symbol, timeframe }) => {
       }
     ]
 
-    setChartData({
-      labels,
-      datasets
-    })
+    // keep base chart data separate so we can add/remove indicators without recalculating bars
+    setBaseChartData({ labels, datasets })
   }
+
+  // Compute indicators and merge into chartData whenever historicalData or toggles change
+  useEffect(() => {
+    if (!baseChartData || !historicalData || historicalData.length === 0) return
+
+    const closes = historicalData.map(c => Number(c.close))
+    const times = baseChartData.labels
+
+    const extraDatasets = []
+
+    // EMA helper
+    const ema = (values, period) => {
+      const k = 2 / (period + 1)
+      const out = []
+      let prev = null
+      for (let i = 0; i < values.length; i++) {
+        const v = values[i]
+        if (i === period - 1) {
+          const sum = values.slice(0, period).reduce((a, b) => a + b, 0)
+          prev = sum / period
+          out[i] = prev
+        } else if (i >= period) {
+          prev = v * k + prev * (1 - k)
+          out[i] = prev
+        } else {
+          out[i] = null
+        }
+      }
+      return out
+    }
+
+    // RSI helper (Wilder)
+    const rsi = (values, period = 14) => {
+      const out = []
+      let gains = 0, losses = 0
+      for (let i = 1; i < values.length; i++) {
+        const change = values[i] - values[i - 1]
+        if (i <= period) {
+          if (change > 0) gains += change
+          else losses += Math.abs(change)
+          if (i === period) {
+            let avgGain = gains / period
+            let avgLoss = losses / period
+            const rs = avgLoss === 0 ? 100 : avgGain / avgLoss
+            out[i] = 100 - 100 / (1 + rs)
+            var prevAvgGain = avgGain
+            var prevAvgLoss = avgLoss
+          }
+        } else {
+          const gain = Math.max(0, change)
+          const loss = Math.max(0, -change)
+          prevAvgGain = (prevAvgGain * (period - 1) + gain) / period
+          prevAvgLoss = (prevAvgLoss * (period - 1) + loss) / period
+          const rs = prevAvgLoss === 0 ? 100 : prevAvgGain / prevAvgLoss
+          out[i] = 100 - 100 / (1 + rs)
+        }
+      }
+      return out
+    }
+
+    // Bollinger Bands helper (SMA + stddev)
+    const sma = (values, period) => {
+      const out = []
+      for (let i = 0; i < values.length; i++) {
+        if (i >= period - 1) {
+          const slice = values.slice(i - period + 1, i + 1)
+          const mean = slice.reduce((a, b) => a + b, 0) / period
+          out[i] = mean
+        } else {
+          out[i] = null
+        }
+      }
+      return out
+    }
+
+    if (emaEnabled) {
+      const fast = ema(closes, 12)
+      const slow = ema(closes, 26)
+      extraDatasets.push({
+        label: 'EMA 12',
+        type: 'line',
+        data: fast.map((v, i) => ({ x: times[i], y: v })),
+        borderColor: 'rgba(255,165,0,0.95)',
+        borderWidth: 2,
+        backgroundColor: 'transparent',
+        tension: 0.15,
+        pointRadius: 0,
+        fill: false,
+        spanGaps: true
+      })
+      extraDatasets.push({
+        label: 'EMA 26',
+        type: 'line',
+        data: slow.map((v, i) => ({ x: times[i], y: v })),
+        borderColor: 'rgba(54,162,235,0.95)',
+        borderWidth: 2,
+        backgroundColor: 'transparent',
+        tension: 0.15,
+        pointRadius: 0,
+        fill: false,
+        spanGaps: true
+      })
+    }
+
+    if (bbEnabled) {
+      const period = 20
+      const middle = sma(closes, period)
+      const upper = []
+      const lower = []
+      for (let i = 0; i < closes.length; i++) {
+        if (i >= period - 1 && middle[i] != null) {
+          const slice = closes.slice(i - period + 1, i + 1)
+          const mean = middle[i]
+          const variance = slice.reduce((acc, v) => acc + Math.pow(v - mean, 2), 0) / period
+          const sd = Math.sqrt(variance)
+          upper[i] = mean + 2 * sd
+          lower[i] = mean - 2 * sd
+        } else {
+          upper[i] = null
+          lower[i] = null
+        }
+      }
+
+      extraDatasets.push({
+        label: 'BB Upper',
+        type: 'line',
+        data: upper.map((v, i) => ({ x: times[i], y: v })),
+        borderColor: 'rgba(153,102,255,0.6)',
+        borderDash: [4, 4],
+        borderWidth: 1,
+        pointRadius: 0,
+        fill: false,
+        spanGaps: true
+      })
+      extraDatasets.push({
+        label: 'BB Middle',
+        type: 'line',
+        data: middle.map((v, i) => ({ x: times[i], y: v })),
+        borderColor: 'rgba(153,102,255,0.9)',
+        borderWidth: 1,
+        pointRadius: 0,
+        fill: false,
+        spanGaps: true
+      })
+      extraDatasets.push({
+        label: 'BB Lower',
+        type: 'line',
+        data: lower.map((v, i) => ({ x: times[i], y: v })),
+        borderColor: 'rgba(153,102,255,0.6)',
+        borderDash: [4, 4],
+        borderWidth: 1,
+        pointRadius: 0,
+        fill: false,
+        spanGaps: true
+      })
+    }
+
+    if (rsiEnabled) {
+      const rr = rsi(closes, 14)
+      extraDatasets.push({
+        label: 'RSI (14)',
+        type: 'line',
+        data: rr.map((v, i) => ({ x: times[i], y: v })),
+        borderColor: 'rgba(255,99,132,0.95)',
+        borderWidth: 1.5,
+        backgroundColor: 'transparent',
+        tension: 0.2,
+        pointRadius: 0,
+        fill: false,
+        yAxisID: 'rsi',
+        spanGaps: true
+      })
+    }
+
+    // Merge base + indicators
+    setChartData({
+      labels: baseChartData.labels,
+      datasets: [...baseChartData.datasets, ...extraDatasets]
+    })
+  }, [baseChartData, historicalData, rsiEnabled, emaEnabled, bbEnabled])
 
   useEffect(() => {
     fetchHistoricalData()
@@ -209,6 +398,14 @@ const CandlestickChart = ({ exchange, symbol, timeframe }) => {
       },
       y: {
         beginAtZero: false
+      },
+      rsi: {
+        type: 'linear',
+        position: 'right',
+        suggestedMin: 0,
+        suggestedMax: 100,
+        display: true,
+        grid: { drawOnChartArea: false }
       }
     },
     interaction: {
@@ -224,6 +421,21 @@ const CandlestickChart = ({ exchange, symbol, timeframe }) => {
         <div className={`connection-status ${isConnected ? 'connected' : 'disconnected'}`}>
           {isConnected ? '🟢 Live Data' : '🔴 Disconnected'}
         </div>
+      </div>
+      {/* Indicator toggles */}
+      <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', margin: '0.5rem 0' }}>
+        <label style={{ display: 'flex', gap: '0.25rem', alignItems: 'center' }}>
+          <input type="checkbox" checked={rsiEnabled} onChange={(e) => setRsiEnabled(e.target.checked)} />
+          RSI
+        </label>
+        <label style={{ display: 'flex', gap: '0.25rem', alignItems: 'center' }}>
+          <input type="checkbox" checked={emaEnabled} onChange={(e) => setEmaEnabled(e.target.checked)} />
+          EMA(12/26)
+        </label>
+        <label style={{ display: 'flex', gap: '0.25rem', alignItems: 'center' }}>
+          <input type="checkbox" checked={bbEnabled} onChange={(e) => setBbEnabled(e.target.checked)} />
+          Bollinger Bands
+        </label>
       </div>
 
       {error && (
