@@ -5,7 +5,7 @@ const ExchangeSelector = ({
   selectedSymbol,
   selectedTimeframe,
   availableMarkets,
-  onExchangeChange,
+ 
   onSymbolChange,
   onTimeframeChange
 }) => {
@@ -46,21 +46,7 @@ const ExchangeSelector = ({
       <h3>Market Selection</h3>
       
       <div className="selector-grid">
-        <div className="selector-group">
-          <label htmlFor="exchange-select">Exchange:</label>
-          <select
-            id="exchange-select"
-            value={selectedExchange}
-            onChange={(e) => onExchangeChange(e.target.value)}
-            className="selector"
-          >
-            {exchanges.map(exchange => (
-              <option key={exchange.id} value={exchange.id}>
-                {exchange.name}
-              </option>
-            ))}
-          </select>
-        </div>
+      
 
         <div className="selector-group">
           <label htmlFor="symbol-select">Trading Pair:</label>
