@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { WS_BASE } from '../api'
 
 const TickerWidget = ({ exchange, symbol }) => {
   const [tickerData, setTickerData] = useState(null)
@@ -12,7 +13,7 @@ const TickerWidget = ({ exchange, symbol }) => {
         wsRef.current.close()
       }
 
-  const wsUrl = `ws://localhost:8000/ws/ticker/${encodeURIComponent(exchange)}/${encodeURIComponent(symbol)}`
+  const wsUrl = `${WS_BASE}/ws/ticker/${encodeURIComponent(exchange)}/${encodeURIComponent(symbol)}`
       wsRef.current = new WebSocket(wsUrl)
 
       wsRef.current.onopen = () => {

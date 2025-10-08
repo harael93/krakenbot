@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { API_BASE, WS_BASE } from '../api'
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -34,7 +35,6 @@ const CandlestickChart = ({ exchange, symbol, timeframe }) => {
   const [historicalData, setHistoricalData] = useState([])
   const [baseChartData, setBaseChartData] = useState(null)
   const [botTrades, setBotTrades] = useState([])
-  const API_BASE = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_BASE) ? import.meta.env.VITE_API_BASE : 'http://localhost:8000'
 
   // Indicator toggles
   const [rsiEnabled, setRsiEnabled] = useState(false)
@@ -45,7 +45,7 @@ const CandlestickChart = ({ exchange, symbol, timeframe }) => {
   // Fetch initial historical data
   const fetchHistoricalData = useCallback(async () => {
     try {
-      const response = await fetch(`http://localhost:8000/ohlcv/${encodeURIComponent(exchange)}/${encodeURIComponent(symbol)}?timeframe=${encodeURIComponent(timeframe)}&limit=100`)
+      const response = await fetch(`${API_BASE}/ohlcv/${encodeURIComponent(exchange)}/${encodeURIComponent(symbol)}?timeframe=${encodeURIComponent(timeframe)}&limit=100`)
       if (response.ok) {
         const data = await response.json()
         setHistoricalData(data.data || [])
@@ -64,8 +64,8 @@ const CandlestickChart = ({ exchange, symbol, timeframe }) => {
         wsRef.current.close()
       }
 
-  const wsUrl = `ws://localhost:8000/ws/ohlcv/${encodeURIComponent(exchange)}/${encodeURIComponent(symbol)}/${encodeURIComponent(timeframe)}`
-      wsRef.current = new WebSocket(wsUrl)
+  const wsUrl = `${WS_BASE}/ws/ohlcv/${encodeURIComponent(exchange)}/${encodeURIComponent(symbol)}/${encodeURIComponent(timeframe)}`
+    wsRef.current = new WebSocket(wsUrl)
 
       wsRef.current.onopen = () => {
         setIsConnected(true)

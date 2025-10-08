@@ -5,7 +5,9 @@ import CandlestickChart from './components/CandlestickChart'
 import ExchangeSelector from './components/ExchangeSelector'
 import ApiStatus from './components/ApiStatus'
 
-const API_BASE_URL = 'http://localhost:8000'
+import { API_BASE } from './api'
+
+const API_BASE_URL = API_BASE
 
 function App() {
   // Kraken-only client
@@ -123,7 +125,7 @@ function App() {
         {apiStatus === 'error' && (
           <div className="error-message">
             <h3>Cannot connect to API server</h3>
-            <p>Make sure the FastAPI server is running on localhost:8000</p>
+            <p>Make sure the FastAPI server is running at https://krakenbot.deployedlogic.site</p>
             <p>Run: <code>python main.py</code> in the server directory</p>
           </div>
         )}

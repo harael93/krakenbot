@@ -41,9 +41,12 @@ app = FastAPI(
 )
 
 # Enable CORS for the React client
+from config import config
+
+# Use explicit allowed origins from config to ensure Access-Control-Allow-Origin
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for development
+    allow_origins=config.ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

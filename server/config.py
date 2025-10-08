@@ -8,15 +8,18 @@ from typing import Dict, Any
 class Config:
     # Server settings
     HOST = "0.0.0.0"
-    PORT = 8000
+    PORT = 8080
     DEBUG = True
     
     # CORS settings
     ALLOWED_ORIGINS = [
         "http://localhost:5173",  # Vite dev server
         "http://localhost:3000",  # Create React App dev server
-        "http://localhost:8080",  # Alternative dev server
+        "http://localhost:8080",
+        'https://krakenbot.pages.dev',  # production frontend URL
+        'https://krakenbot.deployedlogic.site',  # additional production host
     ]
+    
     
     # Default exchange settings
     DEFAULT_EXCHANGE = "binance"
