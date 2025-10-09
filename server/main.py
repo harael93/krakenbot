@@ -3,7 +3,7 @@ FastAPI server for cryptocurrency market data using CCXT Pro
 Provides WebSocket endpoints for real-time market data and candlestick charts
 """
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 import ccxt
@@ -40,6 +40,17 @@ app = FastAPI(
     version="1.0.0"
 )
 
+
+@app.middleware("http")
+async def log_request_origin(request: Request, call_next):
+    try:
+        origin = request.headers.get('origin')
+        logger.info(f"Incoming request: {request.method} {request.url.path} Origin={origin}")
+    except Exception:
+        logger.exception("Failed to log request origin")
+    response = await call_next(request)
+    return response
+
 # Enable CORS for the React client
 from config import config
 
@@ -61,6 +72,12 @@ class ConnectionManager:
         self.active_connections: Dict[str, List[WebSocket]] = {}
     
     async def connect(self, websocket: WebSocket, room: str):
+        # Log the incoming WebSocket Origin header for debugging CORS/handshake issues
+        try:
+            origin = websocket.headers.get('origin')
+        except Exception:
+            origin = None
+        logger.info(f"WebSocket connect requested for room={room} origin={origin}")
         await websocket.accept()
         if room not in self.active_connections:
             self.active_connections[room] = []
@@ -194,6 +211,13 @@ def resolve_symbol_for_exchange(exchange, symbol: str) -> str:
 @app.get("/")
 async def root():
     return {"message": "KrakenBot API is running", "version": "1.0.0"}
+
+
+@app.get("/debug/origin")
+async def debug_origin(request: Request):
+    """Return the incoming Origin header for debugging CORS issues."""
+    origin = request.headers.get('origin')
+    return {"origin": origin}
 
 @app.get("/exchanges")
 async def get_available_exchanges():

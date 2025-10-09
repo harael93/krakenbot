@@ -18,6 +18,7 @@ class Config:
         "http://localhost:8080",
         'https://krakenbot.pages.dev',  # production frontend URL
         'https://krakenbot.deployedlogic.site',  # additional production host
+        'http://localhost:8082' # backend host for testing
     ]
     
     
